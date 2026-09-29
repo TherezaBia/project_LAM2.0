@@ -1,13 +1,15 @@
 // 3D-Aware Facial Mesh Symmetry Renderer
 // Uses WebGL to render 449 anatomical facial triangles in real-time.
-// Features:
-// 1. Premultiplied alpha rendering (zero dark borders / black fringes).
-// 2. Soft midline feathering (prevents split/deformed nose when rotating head).
-// 3. Boundary ring feathering (eliminates stretched hair/headphone black polygons).
+// Fixes:
+// 1. Nose solid attachment: Midline vertices are fully opaque and solidly anchored
+//    to facial landmarks (no transparency, no double nostrils, no floating/loose mesh).
+// 2. Dynamic Occlusion Handling: When turning toward the source side (e.g. looking left),
+//    the occluded lateral cheek smoothly fades back to the user's REAL CAMERA SKIN.
+// 3. Premultiplied alpha: Clean blending with Canvas 2D without any dark fringe.
 
 import symmetryData from './face_symmetry_mesh.json';
 
-const { partner, left_triangles, right_triangles, vertex_alpha } = symmetryData;
+const { partner, left_triangles, right_triangles, vertex_alpha, canonical_vertices } = symmetryData;
 
 // Flattened index buffers
 const rightIndices = new Uint16Array(right_triangles.flat());
@@ -15,11 +17,19 @@ const leftIndices = new Uint16Array(left_triangles.flat());
 
 const defaultVertexAlphas = new Float32Array(vertex_alpha || new Array(468).fill(1.0));
 
+// Precalculate normalized lateral distance from facial midline for each vertex:
+// 0.0 = center (nose, lips), 1.0 = outer edge (ear, temple)
+const lateralDistances = new Float32Array(468);
+if (canonical_vertices) {
+  for (let i = 0; i < 468; i++) {
+    lateralDistances[i] = Math.abs(canonical_vertices[i][0]) / 7.7431;
+  }
+}
+
 let glCanvas = null;
 let gl = null;
 let program = null;
 let positionBuffer = null;
-let pixelPosBuffer = null;
 let texCoordBuffer = null;
 let alphaBuffer = null;
 let indexBuffer = null;
@@ -27,24 +37,20 @@ let texture = null;
 
 // Reusable vertex arrays
 const positions = new Float32Array(468 * 2);
-const pixelPositions = new Float32Array(468 * 2);
 const texCoords = new Float32Array(468 * 2);
 const alphas = new Float32Array(468);
 
 const VS_SOURCE = `
 attribute vec2 a_position;
-attribute vec2 a_pixelPos;
 attribute vec2 a_texCoord;
 attribute float a_alpha;
 
 varying vec2 v_texCoord;
-varying vec2 v_pixelPos;
 varying float v_alpha;
 
 void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
   v_texCoord = a_texCoord;
-  v_pixelPos = a_pixelPos;
   v_alpha = a_alpha;
 }
 `;
@@ -53,31 +59,15 @@ const FS_SOURCE = `
 precision mediump float;
 uniform sampler2D u_image;
 uniform float u_strength;
-uniform vec2 u_lineP1;
-uniform vec2 u_lineP2;
-uniform float u_midlineFeather;
 
 varying vec2 v_texCoord;
-varying vec2 v_pixelPos;
 varying float v_alpha;
 
 void main() {
-  // Distance from facial midline line (P1 -> P2)
-  vec2 d = u_lineP2 - u_lineP1;
-  float len = length(d);
-  float dist = 100.0;
-  if (len > 0.001) {
-    vec2 n = vec2(-d.y, d.x) / len;
-    dist = abs(dot(v_pixelPos - u_lineP1, n));
-  }
-
-  // Smooth fade across the midline to prevent sharp nose/chin seams
-  float midlineFade = smoothstep(0.0, max(u_midlineFeather, 1.0), dist);
-  float totalAlpha = v_alpha * midlineFade * u_strength;
-
   vec4 color = texture2D(u_image, v_texCoord);
+  float totalAlpha = v_alpha * u_strength;
 
-  // Output PREMULTIPLIED alpha so Canvas 2D composite produces ZERO black borders:
+  // Premultiplied alpha output ensures ZERO dark fringe or black borders
   gl_FragColor = vec4(color.rgb * totalAlpha, totalAlpha);
 }
 `;
@@ -101,7 +91,7 @@ function initWebGL(width, height) {
   glCanvas.width = width;
   glCanvas.height = height;
 
-  // CRITICAL: premultipliedAlpha must be true so Canvas 2D drawImage does not darken the edges!
+  // Premultiplied alpha for clean compositing with Canvas 2D
   gl = glCanvas.getContext('webgl', { alpha: true, premultipliedAlpha: true });
   if (!gl) return null;
 
@@ -119,7 +109,6 @@ function initWebGL(width, height) {
   gl.useProgram(program);
 
   positionBuffer = gl.createBuffer();
-  pixelPosBuffer = gl.createBuffer();
   texCoordBuffer = gl.createBuffer();
   alphaBuffer = gl.createBuffer();
   indexBuffer = gl.createBuffer();
@@ -132,7 +121,6 @@ function initWebGL(width, height) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
   gl.enable(gl.BLEND);
-  // Blending for premultiplied alpha:
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
   return gl;
@@ -144,7 +132,7 @@ function initWebGL(width, height) {
  * @param {HTMLCanvasElement} frameCanvas - Unmodified video canvas in selfie view
  * @param {boolean} isHealthyLeft - true if person's left is healthy (viewer right)
  * @param {number} strength - 0.0 to 1.0 opacity
- * @param {number} feather - Midline feather radius in pixels
+ * @param {number} feather - Softness control (0..50)
  * @param {Function} pointFn - function(landmarks, index) returning {x, y} in canvas space
  * @returns {HTMLCanvasElement|null} - rendered WebGL canvas
  */
@@ -157,13 +145,28 @@ export function renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, streng
   }
 
   gl.viewport(0, 0, width, height);
-  // Clear to transparent
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   gl.useProgram(program);
 
-  // Compute position, pixel coords, UV, and boundary alpha for all 468 vertices
+  // 1. Calculate head rotation (yaw) and source occlusion:
+  // p1 = nose tip; p234 = Person's Right cheek; p454 = Person's Left cheek
+  const p1 = pointFn(landmarks, 1);
+  const p234 = pointFn(landmarks, 234);
+  const p454 = pointFn(landmarks, 454);
+
+  let sourceVisibility = 1.0;
+  if (p1 && p234 && p454) {
+    const dRight = Math.hypot(p1.x - p234.x, p1.y - p234.y);
+    const dLeft = Math.hypot(p1.x - p454.x, p1.y - p454.y);
+
+    // If healthy side is Person's Left, turning left compresses dLeft:
+    const ratio = isHealthyLeft ? (dLeft / Math.max(dRight, 1)) : (dRight / Math.max(dLeft, 1));
+    sourceVisibility = ratio;
+  }
+
+  // 2. Populate vertex buffers
   for (let i = 0; i < 468; i++) {
     const dstPoint = pointFn(landmarks, i);
     const partnerId = partner[i];
@@ -174,21 +177,32 @@ export function renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, streng
       positions[i * 2] = (dstPoint.x / width) * 2 - 1;
       positions[i * 2 + 1] = 1 - (dstPoint.y / height) * 2;
 
-      // Pixel positions [0..width, 0..height]
-      pixelPositions[i * 2] = dstPoint.x;
-      pixelPositions[i * 2 + 1] = dstPoint.y;
-
       // Texture UV space: [0, 1]
       texCoords[i * 2] = srcPoint.x / width;
       texCoords[i * 2 + 1] = srcPoint.y / height;
 
-      // Boundary fade alpha (0.0 on face oval, 0.5 on inner border, 1.0 inside)
-      alphas[i] = defaultVertexAlphas[i];
+      // Alpha calculation:
+      // Base alpha: 0.0 on face oval, 0.5 on inner ring, 1.0 inside
+      let a = defaultVertexAlphas[i];
+
+      // Dynamic Occlusion Handling:
+      // When the head turns towards the source side (e.g. looking left with healthy left),
+      // sourceVisibility drops. We dynamically fade out the lateral cheek vertices (lat > maxLat)
+      // to 0.0, revealing the user's REAL CAMERA SKIN softly with zero dark hair/headphone stretching!
+      const lat = lateralDistances[i];
+      if (sourceVisibility < 1.05) {
+        // When sourceVisibility is low (e.g. 0.4 - 0.7), maxLat contracts inward
+        const maxLat = Math.min(0.85, Math.max(0.38, sourceVisibility * 0.95));
+        if (lat > maxLat - 0.15) {
+          const fade = Math.max(0.0, Math.min(1.0, (maxLat - lat + 0.15) / 0.20));
+          a *= fade;
+        }
+      }
+
+      alphas[i] = a;
     } else {
       positions[i * 2] = 0;
       positions[i * 2 + 1] = 0;
-      pixelPositions[i * 2] = 0;
-      pixelPositions[i * 2 + 1] = 0;
       texCoords[i * 2] = 0;
       texCoords[i * 2 + 1] = 0;
       alphas[i] = 0;
@@ -201,13 +215,6 @@ export function renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, streng
   const aPos = gl.getAttribLocation(program, 'a_position');
   gl.enableVertexAttribArray(aPos);
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  // Upload pixel positions
-  gl.bindBuffer(gl.ARRAY_BUFFER, pixelPosBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, pixelPositions, gl.DYNAMIC_DRAW);
-  const aPixelPos = gl.getAttribLocation(program, 'a_pixelPos');
-  gl.enableVertexAttribArray(aPixelPos);
-  gl.vertexAttribPointer(aPixelPos, 2, gl.FLOAT, false, 0, 0);
 
   // Upload UVs
   gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
@@ -227,23 +234,12 @@ export function renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, streng
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frameCanvas);
 
-  // Midline line coordinates (forehead point 10 -> chin point 152)
-  const pTop = pointFn(landmarks, 10) || { x: width * 0.5, y: 0 };
-  const pBot = pointFn(landmarks, 152) || { x: width * 0.5, y: height };
-
-  const uP1 = gl.getUniformLocation(program, 'u_lineP1');
-  gl.uniform2f(uP1, pTop.x, pTop.y);
-
-  const uP2 = gl.getUniformLocation(program, 'u_lineP2');
-  gl.uniform2f(uP2, pBot.x, pBot.y);
-
-  const uMidFeather = gl.getUniformLocation(program, 'u_midlineFeather');
-  gl.uniform1f(uMidFeather, Math.max(feather, 12));
-
   const uStrength = gl.getUniformLocation(program, 'u_strength');
   gl.uniform1f(uStrength, strength);
 
-  // Choose triangles for target hemiface
+  // Choose triangles for target hemiface:
+  // If healthy side is Left -> target is Person's Right (right_triangles)
+  // If healthy side is Right -> target is Person's Left (left_triangles)
   const indices = isHealthyLeft ? rightIndices : leftIndices;
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
