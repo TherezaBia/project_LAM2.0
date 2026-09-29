@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Protótipo de espelhamento facial usando a imagem real da webcam e uma malha de suporte baseada em landmarks." />
+  <title>Espelho facial · rosto real</title>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="mark">◐</span><div><strong>Espelho facial</strong><span>Rosto real · investigação 02</span></div></div>
+    <span class="badge">Malha de suporte</span>
+  </header>
+  <main>
+    <section class="workspace" aria-label="Visualização do rosto real">
+      <div class="stage-header"><div><h1>O rosto continua sendo o seu</h1><p>A imagem da webcam fica na base; a deformação é aplicada apenas na região escolhida.</p></div><span class="live-badge" id="live-badge">Câmera desativada</span></div>
+      <div id="stage">
+        <video id="camera-video" autoplay playsinline muted hidden></video>
+        <canvas id="mirror-canvas" aria-label="Imagem da webcam com espelhamento facial"></canvas>
+        <canvas id="debug-canvas" aria-hidden="true"></canvas>
+        <div class="stage-label top-left" id="load-state" role="status">Pronto para iniciar</div>
+        <div class="orientation"><span>Direita da pessoa</span><span>Esquerda da pessoa</span></div>
+        <div class="stage-footer"><span id="mode-label">Imagem original</span><span id="fps">FPS: —</span></div>
+        <div id="loading" class="loading" hidden><span class="spinner"></span><strong>Carregando rastreador facial</strong><p>O modelo do MediaPipe será processado neste navegador.</p></div>
+        <div id="error" class="error" hidden><strong>Não foi possível iniciar a câmera</strong><p id="error-message"></p><button id="retry">Tentar novamente</button></div>
+      </div>
+      <div class="test-strip"><span class="step">01</span><p><strong>Primeiro teste: rosto real.</strong> Ative a webcam e faça uma expressão. O lado esquerdo saudável deve ser usado como fonte para a região direita, sem transformar a pessoa em avatar.</p></div>
+      <details class="notes"><summary>O que está sendo usado nesta versão</summary><p>A webcam é a camada visual principal. O MediaPipe fornece landmarks e pose; a malha triangular serve apenas para calcular a deformação da textura real.</p><p>O LAM não é desenhado nesta versão. Ele fica separado porque o seu resultado é uma cabeça/avatar Gaussian, não uma simples malha neutra para receber a textura da webcam.</p><p id="technical-note">Esta é a primeira prova de composição real. A preservação exata da íris, da esclera e a rotação ampla precisam ser refinadas e medidas nos próximos testes.</p></details>
+    </section>
+    <aside aria-label="Controles do experimento">
+      <div class="panel-title"><h2>Espelhamento real</h2><button id="reset" class="text-button">Reiniciar</button></div>
+      <fieldset id="camera-panel"><legend>Webcam e rastreamento</legend><button id="start-camera" type="button">Ativar webcam</button><span class="camera-status" id="camera-status" role="status">Câmera desativada</span><p class="helper">Use HTTPS ou localhost para permitir o acesso à câmera.</p></fieldset>
+      <fieldset id="mirror-panel" disabled>
+        <legend>Região espelhada</legend>
+        <label><input id="mirror-enabled" type="checkbox" checked /> Espelhamento ativo</label>
+        <label for="mirror-mode" style="display:block;margin:10px 0 4px;font-weight:600;font-size:12px;">Modo de espelhamento:</label>
+        <select id="mirror-mode" style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font-size:13px;color:#25263d;margin-bottom:10px;">
+          <option value="mesh3d" selected>Malha 3D Anatômica (Funciona de lado e com rotação)</option>
+          <option value="sagittal2d">Espelho Sagital 2D (Frente plano)</option>
+        </select>
+        <label for="source-side" style="display:block;margin:10px 0 4px;font-weight:600;font-size:12px;">Lado saudável (fonte de movimento):</label>
+        <select id="source-side" style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font-size:13px;color:#25263d;margin-bottom:10px;">
+          <option value="left" selected>Esquerdo da pessoa → Reconstrói o direito</option>
+          <option value="right">Direito da pessoa → Reconstrói o esquerdo</option>
+        </select>
+        <label class="slider-label" for="strength">Intensidade do espelho <output id="strength-value">100%</output></label>
+        <input id="strength" type="range" min="0" max="1" step="0.01" value="1" />
+        <label class="slider-label" for="feather">Suavidade da borda (feather) <output id="feather-value">16 px</output></label>
+        <input id="feather" type="range" min="0" max="50" step="1" value="16" />
+        <label><input id="show-mesh" type="checkbox" /> Mostrar malha e eixo de espelhamento</label>
+      </fieldset>
+      <fieldset id="preserve-panel" disabled>
+        <legend>Preservação</legend>
+        <label><input id="preserve-eye" type="checkbox" /> Preservar olho original afetado</label>
+        <p class="helper" style="margin-top:2px;">Desmarcado: o olho saudável é espelhado (piscar e olhar sincronizados). Marcado: mantém o olho original da pessoa.</p>
+      </fieldset>
+      <div class="status-box"><span class="eyebrow">TERAPIA ESPELHO DIGITAL</span><strong>Rosto real · Reconstrução de hemiface</strong><p>A hemiface afetada reproduz os movimentos da hemiface saudável em tempo real com textura 100% real da câmera.</p></div>
+    </aside>
+  </main>
+  <footer>Pesquisa de espelhamento facial <span>MediaPipe · malha de suporte 2D · rosto real</span></footer>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

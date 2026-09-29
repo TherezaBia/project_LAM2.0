@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+      "module": "ESNext",
+      "target": "ES6",
+      "strict": true,
+      "esModuleInterop": true,
+      "outDir": "./build",
+      "typeRoots": ["./node_modules/@types"],
+      "importHelpers": true
+
+  },
+  "include": ["./src/**/*"],
+  "exclude": [
+    "node_modules"
+    // "./src/*.ts",
+  ]
+}

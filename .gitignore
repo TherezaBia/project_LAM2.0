@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.sites-runtime/
+.DS_Store
+
+# LAM model files (large)
+lam_repo/
+model_zoo/
+*.safetensors
+*.pkl
+*.tar
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Output and cache
+output/
+.cache/
+mediapipe_symmetry.json
