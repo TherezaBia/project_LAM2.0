@@ -30,7 +30,7 @@ const state = {
   mirrorMode: 'mesh3d', // 'mesh3d' handles 3D head rotation; 'sagittal2d' is planar reflection
   sourceSide: 'left', // 'left' = person's left is healthy source; 'right' = person's right is healthy source
   strength: 1,
-  feather: 16,
+  feather: 20,
   preserveEye: false, // Default false so mirror movement & blink is immediately visible
   showMesh: false,
   landmarks: null,
@@ -337,7 +337,7 @@ function render(result) {
 
     if (state.mirrorMode === 'mesh3d') {
       // 3D-Aware Facial Mesh Symmetry: follows head rotation (yaw, pitch, roll)
-      const glCanvas = renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, state.strength, point);
+      const glCanvas = renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, state.strength, state.feather, point);
       if (glCanvas) {
         ctx.save();
         ctx.drawImage(glCanvas, 0, 0);
