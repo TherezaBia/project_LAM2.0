@@ -61,8 +61,6 @@ function setStatus(message, kind = '') {
   $('camera-status').textContent = message;
   $('camera-status').className = `camera-status ${kind}`;
   $('load-state').textContent = message;
-  $('live-badge').textContent = state.camera ? (state.tracking ? 'Rastreando rosto' : 'Procurando rosto') : 'Câmera desativada';
-  $('live-badge').className = `live-badge ${kind}`;
 }
 
 function setPanels(enabled) {
@@ -335,26 +333,20 @@ function render(result) {
   if (landmarks && state.mirrorEnabled) {
     const isHealthyLeft = state.sourceSide === 'left';
 
-    if (state.mirrorMode === 'mesh3d') {
-      // 3D-Aware Facial Mesh Symmetry: follows head rotation (yaw, pitch, roll)
-      const glCanvas = renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, state.strength, state.feather, point);
-      if (glCanvas) {
-        ctx.save();
-        ctx.drawImage(glCanvas, 0, 0);
-        ctx.restore();
-      }
-      if (state.preserveEye) {
-        restoreEyeRegion(landmarks, isHealthyLeft ? RIGHT_EYE_INDICES : LEFT_EYE_INDICES);
-      }
-    } else {
-      // 2D Sagittal Planar Reflection (Facing forward)
-      applyHemifaceMirror(landmarks);
+    // 3D-Aware Facial Mesh Symmetry: follows head rotation (yaw, pitch, roll)
+    const glCanvas = renderMesh3DMirror(landmarks, frameCanvas, isHealthyLeft, state.strength, state.feather, point);
+    if (glCanvas) {
+      ctx.save();
+      ctx.drawImage(glCanvas, 0, 0);
+      ctx.restore();
+    }
+    if (state.preserveEye) {
+      restoreEyeRegion(landmarks, isHealthyLeft ? RIGHT_EYE_INDICES : LEFT_EYE_INDICES);
     }
 
     drawDebugOverlay(landmarks);
-    const modeName = state.mirrorMode === 'mesh3d' ? 'Malha 3D (Anti-rotação)' : 'Sagital 2D (Plano)';
     const sideText = state.sourceSide === 'left' ? 'Esquerda → Direita' : 'Direita → Esquerda';
-    $('mode-label').textContent = `${modeName} · ${sideText} · ${state.preserveEye ? 'olho original preservado' : 'olho espelhado'}`;
+    $('mode-label').textContent = `Malha 3D · ${sideText} · ${state.preserveEye ? 'olho original preservado' : 'olho espelhado'}`;
   } else {
     debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
     $('mode-label').textContent = landmarks ? 'Espelhamento pausado' : 'Procurando rosto na câmera...';
@@ -478,9 +470,6 @@ $('mirror-enabled')?.addEventListener('change', event => {
   state.mirrorEnabled = event.target.checked;
 });
 
-$('mirror-mode')?.addEventListener('change', event => {
-  state.mirrorMode = event.target.value;
-});
 
 $('source-side')?.addEventListener('change', event => {
   state.sourceSide = event.target.value;

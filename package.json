@@ -10,12 +10,6 @@
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^1.1.0",
-    "@vitejs/plugin-vue": "^5.1.3",
-    "vite": "^5.1.6",
-    "vue-tsc": "^2.1.4"
-  },
-  "dependencies": {
-    "gaussian-splat-renderer-for-lam": "0.0.9-alpha.1"
-  },
-  "repository": "https://github.com/aigc3d/LAM_WebRender"
+    "vite": "^5.1.6"
+  }
 }
